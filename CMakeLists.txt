@@ -24,6 +24,11 @@ if(NOT TARGET mc_rtc::mc_rtc_ros)
   message(FATAL_ERROR "mc_rtc ROS plugin is required for this controller")
 endif()
 
+# mujoco_tactile_sensor_plugin
+find_package(PkgConfig)
+pkg_check_modules(mujoco_tactile_sensor_plugin REQUIRED IMPORTED_TARGET
+                  mujoco_tactile_sensor_plugin)
+
 add_subdirectory(src)
 
 # if(INSTALL_DOCUMENTATION) add_subdirectory(doc) endif()
