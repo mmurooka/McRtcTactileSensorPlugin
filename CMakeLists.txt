@@ -29,6 +29,9 @@ find_package(PkgConfig)
 pkg_check_modules(mujoco_tactile_sensor_plugin REQUIRED IMPORTED_TARGET
                   mujoco_tactile_sensor_plugin)
 
+install(FILES etc/TactileSensor.yaml
+        DESTINATION "${MC_PLUGINS_RUNTIME_INSTALL_PREFIX}/etc")
+
 add_subdirectory(src)
 
 # if(INSTALL_DOCUMENTATION) add_subdirectory(doc) endif()
