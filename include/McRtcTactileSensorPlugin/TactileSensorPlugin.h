@@ -34,6 +34,9 @@ protected:
   void sensorCallback(const mujoco_tactile_sensor_plugin::TactileSensorData::ConstPtr & sensorMsg);
 
 protected:
+  //! Frame name of tactile sensor
+  std::string tactileSensorFrameName_;
+
   //! Force sensor name
   std::string forceSensorName_;
 

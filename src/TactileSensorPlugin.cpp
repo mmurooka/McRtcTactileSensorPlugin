@@ -1,6 +1,7 @@
 #include <mc_control/GlobalPluginMacros.h>
 
 #include <McRtcTactileSensorPlugin/TactileSensorPlugin.h>
+#include <eigen_conversions/eigen_msg.h>
 
 namespace mc_plugin
 {
@@ -26,6 +27,17 @@ void TactileSensorPlugin::init(mc_control::MCGlobalController & gc, const mc_rtc
         "[mc_plugin::TactileSensorPlugin] The \"sensorTopicName\" key must be specified in the configuration.");
   }
   std::string sensorTopicName = static_cast<std::string>(config("sensorTopicName"));
+  if(!config.has("tactileSensorFrameName"))
+  {
+    mc_rtc::log::error_and_throw(
+        "[mc_plugin::TactileSensorPlugin] The \"tactileSensorFrameName\" key must be specified in the configuration.");
+  }
+  tactileSensorFrameName_ = static_cast<std::string>(config("tactileSensorFrameName"));
+  if(!robot.hasFrame(tactileSensorFrameName_))
+  {
+    mc_rtc::log::error_and_throw("[mc_plugin::TactileSensorPlugin] No frame named \"{}\" exists.",
+                                 tactileSensorFrameName_);
+  }
   if(!config.has("forceSensorName"))
   {
     mc_rtc::log::error_and_throw(
@@ -60,15 +72,35 @@ void TactileSensorPlugin::before(mc_control::MCGlobalController & gc)
 {
   auto & controller = gc.controller();
   auto & robot = controller.robot();
+  auto & forceSensor = robot.data()->forceSensors.at(robot.data()->forceSensorsIndex.at(forceSensorName_));
 
   // Call ROS callback
   callbackQueue_.callAvailable(ros::WallDuration());
 
   // Set measured wrench
-  robot.data()
-      ->forceSensors.at(robot.data()->forceSensorsIndex.at(forceSensorName_))
-      .wrench(sva::ForceVecd(Eigen::Vector3d(10, 0, 0),
-                             Eigen::Vector3d(10, 0, 0))); // \todo Calculate wrench from sensorMsg_
+  sva::ForceVecd wrench = sva::ForceVecd::Zero();
+  if(sensorMsg_)
+  {
+    // Calculate wrench by integrating tactile sensor data
+    for(size_t i = 0; i < sensorMsg_->forces.size(); i++)
+    {
+      Eigen::Vector3d position;
+      Eigen::Vector3d normal;
+      tf::pointMsgToEigen(sensorMsg_->positions[i], position);
+      tf::vectorMsgToEigen(sensorMsg_->normals[i], normal);
+      Eigen::Vector3d force = sensorMsg_->forces[i] * normal;
+      Eigen::Vector3d moment = position.cross(force);
+      wrench.force() += force;
+      wrench.moment() += moment;
+    }
+
+    // Transform from tactile sensor frame to force sensor frame
+    sva::PTransformd tactileSensorPose = robot.frame(tactileSensorFrameName_).position();
+    sva::PTransformd forceSensorPose = forceSensor.X_fsmodel_fsactual() * forceSensor.X_0_f(robot);
+    sva::PTransformd tactileToForceTrans = forceSensorPose * tactileSensorPose.inv();
+    wrench = tactileToForceTrans.dualMul(wrench);
+  }
+  forceSensor.wrench(wrench);
 }
 
 void TactileSensorPlugin::sensorCallback(const mujoco_tactile_sensor_plugin::TactileSensorData::ConstPtr & sensorMsg)
