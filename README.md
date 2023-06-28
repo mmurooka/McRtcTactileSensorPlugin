@@ -14,7 +14,7 @@ mc_rtc plugin to use tactile sensor in controller via ROS interface
 ### Dependencies
 - [mc_rtc](https://jrl-umi3218.github.io/mc_rtc)
 - [isri-aist/MujocoTactileSensorPlugin](https://github.com/isri-aist/MujocoTactileSensorPlugin) (Install as a ROS package)
-- ros-${ROS_DISTRO}-eigen-conversions
+- `ros-${ROS_DISTRO}-eigen-conversions`
 
 ### Installation procedure
 ```bash
@@ -27,3 +27,26 @@ $ cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
 $ make
 $ make install
 ```
+
+## Plugins
+### TactileSensor
+This plugin receives tactile sensor data via ROS topic and sets wrench on the robot's force sensor in mc_rtc controller.
+
+See [this page](https://jrl-umi3218.github.io/mc_rtc/tutorials/usage/global-plugins.html) for a general tutorial on configuring mc_rtc plugins.
+
+Put the following line in the mc_rtc configuration (e.g. `${HOME}/.config/mc_rtc/mc_rtc.yaml`).
+```yaml
+Plugins: [TactileSensor]
+```
+
+Put the following lines in the plugin configuration (e.g. `${HOME}/.config/mc_rtc/plugins/TactileSensor.yaml`).
+```yaml
+sensors:
+  - topicName: /mujoco/tactile_sensor
+    tactileSensorFrameName: jvrc1_right_elbow_tactile_sensor
+    forceSensorName: RightElbowForceSensor
+```
+
+The above configuration assumes a ROS topic named `/mujoco/tactile_sensor` with a message of type [mujoco_tactile_sensor_plugin/TactileSensorData](https://github.com/isri-aist/MujocoTactileSensorPlugin/blob/main/msg/TactileSensorData.msg) being published by some node (e.g. [isri-aist/MujocoTactileSensorPlugin](https://github.com/isri-aist/MujocoTactileSensorPlugin)).
+The tactile sensor frame (e.g. `jvrc1_right_elbow_tactile_sensor`) must be defined in a URDF model (e.g. `jvrc_description/urdf/jvrc1.urdf`).
+The force sensor (e.g. `RightElbowForceSensor`) must be defined in robot module (e.g. `mc_rtc/src/mc_robots/jvrc1.cpp`).
