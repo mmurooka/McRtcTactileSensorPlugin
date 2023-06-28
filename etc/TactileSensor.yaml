@@ -1,3 +1,4 @@
-sensorTopicName: sensorTopicName
-tactileSensorFrameName: tactileSensorFrameName
-forceSensorName: forceSensorName
+sensors:
+  - topicName: topicName
+    tactileSensorFrameName: tactileSensorFrameName
+    forceSensorName: forceSensorName

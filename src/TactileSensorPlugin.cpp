@@ -2,6 +2,7 @@
 
 #include <McRtcTactileSensorPlugin/TactileSensorPlugin.h>
 #include <eigen_conversions/eigen_msg.h>
+#include <functional>
 
 namespace mc_plugin
 {
@@ -21,41 +22,57 @@ void TactileSensorPlugin::init(mc_control::MCGlobalController & gc, const mc_rtc
   const auto & robot = controller.robot();
 
   // Load configuration
-  if(!config.has("sensorTopicName"))
+  if(!config.has("sensors"))
   {
     mc_rtc::log::error_and_throw(
-        "[mc_plugin::TactileSensorPlugin] The \"sensorTopicName\" key must be specified in the configuration.");
+        "[mc_plugin::TactileSensorPlugin] The \"sensors\" key must be specified in the configuration.");
   }
-  std::string sensorTopicName = static_cast<std::string>(config("sensorTopicName"));
-  if(!config.has("tactileSensorFrameName"))
+  for(const auto & sensorConfig : config("sensors"))
   {
-    mc_rtc::log::error_and_throw(
-        "[mc_plugin::TactileSensorPlugin] The \"tactileSensorFrameName\" key must be specified in the configuration.");
-  }
-  tactileSensorFrameName_ = static_cast<std::string>(config("tactileSensorFrameName"));
-  if(!robot.hasFrame(tactileSensorFrameName_))
-  {
-    mc_rtc::log::error_and_throw("[mc_plugin::TactileSensorPlugin] No frame named \"{}\" exists.",
-                                 tactileSensorFrameName_);
-  }
-  if(!config.has("forceSensorName"))
-  {
-    mc_rtc::log::error_and_throw(
-        "[mc_plugin::TactileSensorPlugin] The \"forceSensorName\" key must be specified in the configuration.");
-  }
-  forceSensorName_ = static_cast<std::string>(config("forceSensorName"));
-  if(!robot.hasForceSensor(forceSensorName_))
-  {
-    mc_rtc::log::error_and_throw("[mc_plugin::TactileSensorPlugin] No force sensor named \"{}\" exists.",
-                                 forceSensorName_);
+    SensorInfo sensorInfo;
+
+    if(!sensorConfig.has("topicName"))
+    {
+      mc_rtc::log::error_and_throw(
+          "[mc_plugin::TactileSensorPlugin] The \"topicName\" key must be specified in the sensor configuration.");
+    }
+    sensorInfo.topicName = static_cast<std::string>(sensorConfig("topicName"));
+    if(!sensorConfig.has("tactileSensorFrameName"))
+    {
+      mc_rtc::log::error_and_throw("[mc_plugin::TactileSensorPlugin] The \"tactileSensorFrameName\" key must be "
+                                   "specified in the sensor configuration.");
+    }
+    sensorInfo.tactileSensorFrameName = static_cast<std::string>(sensorConfig("tactileSensorFrameName"));
+    if(!robot.hasFrame(sensorInfo.tactileSensorFrameName))
+    {
+      mc_rtc::log::error_and_throw("[mc_plugin::TactileSensorPlugin] No frame named \"{}\" exists.",
+                                   sensorInfo.tactileSensorFrameName);
+    }
+    if(!sensorConfig.has("forceSensorName"))
+    {
+      mc_rtc::log::error_and_throw("[mc_plugin::TactileSensorPlugin] The \"forceSensorName\" key must be specified in "
+                                   "the sensor configuration.");
+    }
+    sensorInfo.forceSensorName = static_cast<std::string>(sensorConfig("forceSensorName"));
+    if(!robot.hasForceSensor(sensorInfo.forceSensorName))
+    {
+      mc_rtc::log::error_and_throw("[mc_plugin::TactileSensorPlugin] No force sensor named \"{}\" exists.",
+                                   sensorInfo.forceSensorName);
+    }
+
+    sensorInfoList_.push_back(sensorInfo);
   }
 
   // Setup ROS
   nh_ = std::make_unique<ros::NodeHandle>();
   // Use a dedicated queue so as not to call callbacks of other modules
   nh_->setCallbackQueue(&callbackQueue_);
-  sensorSub_ = nh_->subscribe<mujoco_tactile_sensor_plugin::TactileSensorData>(
-      sensorTopicName, 1, &TactileSensorPlugin::sensorCallback, this);
+  for(size_t sensorIdx = 0; sensorIdx < sensorInfoList_.size(); sensorIdx++)
+  {
+    sensorSubList_.push_back(nh_->subscribe<mujoco_tactile_sensor_plugin::TactileSensorData>(
+        sensorInfoList_[sensorIdx].topicName, 1,
+        std::bind(&TactileSensorPlugin::sensorCallback, this, std::placeholders::_1, sensorIdx)));
+  }
 
   reset(gc);
 
@@ -65,47 +82,55 @@ void TactileSensorPlugin::init(mc_control::MCGlobalController & gc, const mc_rtc
 void TactileSensorPlugin::reset(mc_control::MCGlobalController & // gc
 )
 {
-  sensorMsg_ = nullptr;
+  sensorMsgList_.clear();
+  sensorMsgList_.resize(sensorSubList_.size(), nullptr);
 }
 
 void TactileSensorPlugin::before(mc_control::MCGlobalController & gc)
 {
   auto & controller = gc.controller();
   auto & robot = controller.robot();
-  auto & forceSensor = robot.data()->forceSensors.at(robot.data()->forceSensorsIndex.at(forceSensorName_));
 
   // Call ROS callback
   callbackQueue_.callAvailable(ros::WallDuration());
 
   // Set measured wrench
-  sva::ForceVecd wrench = sva::ForceVecd::Zero();
-  if(sensorMsg_)
+  for(size_t sensorIdx = 0; sensorIdx < sensorInfoList_.size(); sensorIdx++)
   {
-    // Calculate wrench by integrating tactile sensor data
-    for(size_t i = 0; i < sensorMsg_->forces.size(); i++)
-    {
-      Eigen::Vector3d position;
-      Eigen::Vector3d normal;
-      tf::pointMsgToEigen(sensorMsg_->positions[i], position);
-      tf::vectorMsgToEigen(sensorMsg_->normals[i], normal);
-      Eigen::Vector3d force = sensorMsg_->forces[i] * normal;
-      Eigen::Vector3d moment = position.cross(force);
-      wrench.force() += force;
-      wrench.moment() += moment;
-    }
+    const auto & sensorInfo = sensorInfoList_[sensorIdx];
+    const auto & sensorMsg = sensorMsgList_[sensorIdx];
+    auto & forceSensor = robot.data()->forceSensors.at(robot.data()->forceSensorsIndex.at(sensorInfo.forceSensorName));
 
-    // Transform from tactile sensor frame to force sensor frame
-    sva::PTransformd tactileSensorPose = robot.frame(tactileSensorFrameName_).position();
-    sva::PTransformd forceSensorPose = forceSensor.X_fsmodel_fsactual() * forceSensor.X_0_f(robot);
-    sva::PTransformd tactileToForceTrans = forceSensorPose * tactileSensorPose.inv();
-    wrench = tactileToForceTrans.dualMul(wrench);
+    sva::ForceVecd wrench = sva::ForceVecd::Zero();
+    if(sensorMsg)
+    {
+      // Calculate wrench by integrating tactile sensor data
+      for(size_t i = 0; i < sensorMsg->forces.size(); i++)
+      {
+        Eigen::Vector3d position;
+        Eigen::Vector3d normal;
+        tf::pointMsgToEigen(sensorMsg->positions[i], position);
+        tf::vectorMsgToEigen(sensorMsg->normals[i], normal);
+        Eigen::Vector3d force = sensorMsg->forces[i] * normal;
+        Eigen::Vector3d moment = position.cross(force);
+        wrench.force() += force;
+        wrench.moment() += moment;
+      }
+
+      // Transform from tactile sensor frame to force sensor frame
+      sva::PTransformd tactileSensorPose = robot.frame(sensorInfo.tactileSensorFrameName).position();
+      sva::PTransformd forceSensorPose = forceSensor.X_fsmodel_fsactual() * forceSensor.X_0_f(robot);
+      sva::PTransformd tactileToForceTrans = forceSensorPose * tactileSensorPose.inv();
+      wrench = tactileToForceTrans.dualMul(wrench);
+    }
+    forceSensor.wrench(wrench);
   }
-  forceSensor.wrench(wrench);
 }
 
-void TactileSensorPlugin::sensorCallback(const mujoco_tactile_sensor_plugin::TactileSensorData::ConstPtr & sensorMsg)
+void TactileSensorPlugin::sensorCallback(const mujoco_tactile_sensor_plugin::TactileSensorData::ConstPtr & sensorMsg,
+                                         size_t sensorIdx)
 {
-  sensorMsg_ = std::make_shared<mujoco_tactile_sensor_plugin::TactileSensorData>(*sensorMsg);
+  sensorMsgList_[sensorIdx] = std::make_shared<mujoco_tactile_sensor_plugin::TactileSensorData>(*sensorMsg);
 }
 
 } // namespace mc_plugin

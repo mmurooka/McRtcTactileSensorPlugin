@@ -13,6 +13,20 @@ namespace mc_plugin
 /** \brief Tactile sensor plugin. */
 struct TactileSensorPlugin : public mc_control::GlobalPlugin
 {
+protected:
+  //! Sensor information
+  struct SensorInfo
+  {
+    //! Topic name
+    std::string topicName;
+
+    //! Frame name of tactile sensor
+    std::string tactileSensorFrameName;
+
+    //! Force sensor name
+    std::string forceSensorName;
+  };
+
 public:
   /** \brief Returns the plugin configuration. */
   mc_control::GlobalPlugin::GlobalPluginConfiguration configuration() override;
@@ -30,22 +44,24 @@ public:
   inline void after(mc_control::MCGlobalController & gc) override{};
 
 protected:
-  /** \brief ROS callback of sensor topic. */
-  void sensorCallback(const mujoco_tactile_sensor_plugin::TactileSensorData::ConstPtr & sensorMsg);
+  /** \brief ROS callback of sensor topic.
+      \param sensorMsg sensor message
+      \param sensorIdx sensor index
+   */
+  void sensorCallback(const mujoco_tactile_sensor_plugin::TactileSensorData::ConstPtr & sensorMsg, size_t sensorIdx);
 
 protected:
-  //! Frame name of tactile sensor
-  std::string tactileSensorFrameName_;
+  //! Sensor information list
+  std::vector<SensorInfo> sensorInfoList_;
 
-  //! Force sensor name
-  std::string forceSensorName_;
+  //! Sensor message list
+  std::vector<std::shared_ptr<mujoco_tactile_sensor_plugin::TactileSensorData>> sensorMsgList_;
 
   //! ROS variables
   //! @{
   std::unique_ptr<ros::NodeHandle> nh_;
   ros::CallbackQueue callbackQueue_;
-  ros::Subscriber sensorSub_;
-  std::shared_ptr<mujoco_tactile_sensor_plugin::TactileSensorData> sensorMsg_ = nullptr;
+  std::vector<ros::Subscriber> sensorSubList_;
   //! @}
 };
 
