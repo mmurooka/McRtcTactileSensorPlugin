@@ -37,4 +37,6 @@ install(FILES etc/TactileSensor.yaml
 
 add_subdirectory(src)
 
-# if(INSTALL_DOCUMENTATION) add_subdirectory(doc) endif()
+if(INSTALL_DOCUMENTATION)
+  add_subdirectory(doc)
+endif()
