@@ -57,6 +57,9 @@ protected:
   //! Sensor message list
   std::vector<std::shared_ptr<mujoco_tactile_sensor_plugin::TactileSensorData>> sensorMsgList_;
 
+  //! Original wrench list (only for logging)
+  std::unordered_map<std::string, sva::ForceVecd> origWrenchList_;
+
   //! ROS variables
   //! @{
   std::unique_ptr<ros::NodeHandle> nh_;

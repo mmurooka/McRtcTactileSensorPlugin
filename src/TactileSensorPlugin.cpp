@@ -79,11 +79,20 @@ void TactileSensorPlugin::init(mc_control::MCGlobalController & gc, const mc_rtc
   mc_rtc::log::success("[mc_plugin] Initialized TactileSensorPlugin.");
 }
 
-void TactileSensorPlugin::reset(mc_control::MCGlobalController & // gc
-)
+void TactileSensorPlugin::reset(mc_control::MCGlobalController & gc)
 {
+  auto & controller = gc.controller();
+
   sensorMsgList_.clear();
   sensorMsgList_.resize(sensorSubList_.size(), nullptr);
+
+  for(const auto & sensorInfo : sensorInfoList_)
+  {
+    const auto & forceSensorName = sensorInfo.forceSensorName;
+    origWrenchList_.emplace(forceSensorName, sva::ForceVecd::Zero());
+    controller.logger().addLogEntry("TactileSensorPlugin_origWrenchList_" + forceSensorName, this,
+                                    [this, forceSensorName]() { return origWrenchList_.at(forceSensorName); });
+  }
 }
 
 void TactileSensorPlugin::before(mc_control::MCGlobalController & gc)
@@ -123,6 +132,7 @@ void TactileSensorPlugin::before(mc_control::MCGlobalController & gc)
       sva::PTransformd tactileToForceTrans = forceSensorPose * tactileSensorPose.inv();
       wrench = tactileToForceTrans.dualMul(wrench);
     }
+    origWrenchList_.at(sensorInfo.forceSensorName) = forceSensor.wrenchWithoutGravity(robot);
     forceSensor.wrench(wrench);
   }
 }
